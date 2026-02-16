@@ -645,8 +645,8 @@ def measure_ping(ip, timeout=1.0):
     except:
         pass
 
-    # FALLBACK: TCP connect timing (if ICMP blocked)
-    for port in [3478, 3479, 443, 80]:
+    # FALLBACK 1: TCP connect timing (if ICMP blocked)
+    for port in [443, 80, 3478, 3479]:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
@@ -655,6 +655,29 @@ def measure_ping(ip, timeout=1.0):
             elapsed = (time.perf_counter() - start) * 1000
             sock.close()
             if result == 0:
+                return round(elapsed, 1)
+        except:
+            try: sock.close()
+            except: pass
+
+    # FALLBACK 2: UDP ping (for game servers that only accept UDP)
+    for port in [3478, 3479, 27015, 29523, 443]:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            start = time.perf_counter()
+            sock.sendto(b'\x00' * 4, (ip, port))
+            try:
+                sock.recvfrom(64)
+            except socket.timeout:
+                pass
+            except OSError:
+                # ICMP port-unreachable = server IS reachable
+                pass
+            elapsed = (time.perf_counter() - start) * 1000
+            sock.close()
+            # If response came back quickly (< timeout), we got a ping
+            if elapsed < timeout * 1000 * 0.9:
                 return round(elapsed, 1)
         except:
             try: sock.close()
