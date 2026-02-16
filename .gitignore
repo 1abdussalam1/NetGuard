@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+blocked_ips.json
+dist/
+build/
+*.spec
+*.exe
