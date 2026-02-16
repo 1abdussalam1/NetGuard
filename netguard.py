@@ -782,22 +782,22 @@ def refresh_fw_cache():
     new_set = set(blocked_ips)  # Start with NetGuard's own list
     new_nets = []               # CIDR networks
     try:
-        # PowerShell batch query — fast (doesn't loop per rule)
-        ps_cmd = (
-            'powershell -NoProfile -Command "'
-            '$rules = Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue; '
-            'if ($rules) { '
-            '  $filters = $rules | Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue; '
-            '  $filters.RemoteAddress | Where-Object { $_ -ne \'Any\' -and $_ -ne \'LocalSubnet\' -and $_ -ne \'*\' } | Sort-Object -Unique '
-            '}'
-            '"'
+        # PowerShell batch query — list args (no shell quoting issues)
+        ps_script = (
+            'Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue | '
+            'Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue | '
+            'Select-Object -ExpandProperty RemoteAddress | '
+            'Where-Object { $_ -ne "Any" -and $_ -ne "LocalSubnet" -and $_ -ne "*" } | '
+            'Sort-Object -Unique'
         )
         result = subprocess.run(
-            ps_cmd, shell=True, capture_output=True, text=True, timeout=30
+            ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            capture_output=True, text=True, timeout=30
         )
         if result.returncode == 0 and result.stdout.strip():
             lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
-            print(f"[FW] Found {len(lines)} blocked addresses from firewall")
+            fw_log_msg = f"[FW] Found {len(lines)} blocked addresses"
+            print(fw_log_msg)
             for ip_part in lines:
                 if '/32' in ip_part:
                     new_set.add(ip_part.split('/')[0])
@@ -809,11 +809,12 @@ def refresh_fw_cache():
                         pass
                 else:
                     new_set.add(ip_part)
+        elif result.returncode != 0:
+            print(f"[FW] PowerShell error (code {result.returncode}): {(result.stderr or '')[:300]}")
         else:
-            stderr = (result.stderr or '').strip()[:200]
-            print(f"[FW] PowerShell returned code {result.returncode}, stderr: {stderr}")
+            print("[FW] PowerShell returned empty — no block rules found")
     except Exception as e:
-        print(f"[FW] PowerShell exception: {e}")
+        print(f"[FW] Exception: {e}")
         # Fallback: try netsh with flexible parsing
         try:
             import re
@@ -2857,6 +2858,33 @@ def api_update_check():
 def api_version():
     """Return current version."""
     return jsonify({"version": VERSION})
+
+@app.route('/api/fw_debug')
+def api_fw_debug():
+    """Debug: test PowerShell firewall query and show raw output."""
+    try:
+        ps_script = (
+            'Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue | '
+            'Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue | '
+            'Select-Object -ExpandProperty RemoteAddress | '
+            'Where-Object { $_ -ne "Any" -and $_ -ne "LocalSubnet" -and $_ -ne "*" } | '
+            'Sort-Object -Unique'
+        )
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            capture_output=True, text=True, timeout=30
+        )
+        return jsonify({
+            "returncode": result.returncode,
+            "stdout": result.stdout[:5000],
+            "stderr": result.stderr[:2000],
+            "blocked_ips_internal": list(blocked_ips)[:50],
+            "all_fw_blocked_count": len(all_fw_blocked),
+            "all_fw_networks_count": len(all_fw_networks),
+            "all_fw_blocked_sample": list(all_fw_blocked)[:20],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 @app.route('/api/sniffer_status')
 def api_sniffer_status():
