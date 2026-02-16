@@ -2659,17 +2659,26 @@ def api_connections():
                 "bw_out": bw_out,
             })
 
-    # Inject blocked IPs not in session_ips (so "Blocked Only" filter works)
+    # Inject ALL blocked entries (IPs, CIDRs, ranges) so "Blocked Only" filter works
     seen_ips = {r["ip"] for r in result}
     for blocked_entry in all_fw_blocked:
-        # Skip CIDR/range strings — only inject plain IPs
-        if '/' in blocked_entry or '-' in blocked_entry:
-            continue
         if blocked_entry in seen_ips:
             continue
-        if is_private(blocked_entry):
+        # Get a lookup IP for geo (first IP of range/CIDR, or the IP itself)
+        lookup_ip = blocked_entry
+        if '-' in blocked_entry:
+            lookup_ip = blocked_entry.split('-')[0].strip()
+        elif '/' in blocked_entry:
+            lookup_ip = blocked_entry.split('/')[0].strip()
+        if is_private(lookup_ip):
             continue
-        geo = ip_geo_cache.get(blocked_entry, {})
+        geo = ip_geo_cache.get(lookup_ip, {})
+        if not geo and lookup_ip != blocked_entry:
+            # Trigger geo lookup for this IP
+            try:
+                geo = geo_lookup(lookup_ip)
+            except:
+                geo = {}
         loc_parts = []
         if geo.get("city"): loc_parts.append(geo["city"])
         if geo.get("region_name") and geo.get("region_name") != geo.get("city"):
