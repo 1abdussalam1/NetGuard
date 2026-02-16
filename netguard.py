@@ -219,7 +219,8 @@ monitoring = False
 session_ips = {}       # ip -> {first_seen, ports, process, active, hit_count, ...}
 blocked_ips = set()    # NetGuard's own tracked blocks
 all_fw_blocked = set() # ALL blocked IPs from Windows Firewall (all sources)
-all_fw_networks = []   # CIDR networks from firewall (for range matching)
+all_fw_networks = []   # CIDR/subnet networks from firewall
+all_fw_ranges = []     # IP ranges as (start_int, end_int) tuples
 fw_cache_time = 0      # Last time we scanned the firewall
 ip_geo_cache = {}      # ip -> {country, city, isp, flag, is_me, region, ...}
 ip_ping_cache = {}     # ip -> {latency_ms, last_check}
@@ -411,14 +412,19 @@ def lookup_cloud_ip(ip_str):
 
 # ─── Helpers ───
 def is_fw_blocked(ip):
-    """Check if an IP is blocked — exact match OR falls within a CIDR range."""
+    """Check if an IP is blocked — exact match, CIDR/subnet, or IP range."""
     if ip in blocked_ips or ip in all_fw_blocked:
         return True
-    # Check CIDR networks
     try:
         addr = ipaddress.ip_address(ip)
+        addr_int = int(addr)
+        # Check CIDR/subnet networks (e.g. 34.166.0.0/255.255.0.0)
         for net in all_fw_networks:
             if addr in net:
+                return True
+        # Check IP ranges (e.g. 34.0.0.0-34.0.255.255)
+        for start_int, end_int in all_fw_ranges:
+            if start_int <= addr_int <= end_int:
                 return True
     except:
         pass
@@ -780,7 +786,8 @@ def refresh_fw_cache():
     if now - fw_cache_time < 5:
         return
     new_set = set(blocked_ips)  # Start with NetGuard's own list
-    new_nets = []               # CIDR networks
+    new_nets = []               # CIDR/subnet networks
+    new_ranges = []             # IP ranges as (start_int, end_int)
     try:
         # PowerShell batch query — list args (no shell quoting issues)
         ps_script = (
@@ -796,19 +803,29 @@ def refresh_fw_cache():
         )
         if result.returncode == 0 and result.stdout.strip():
             lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
-            fw_log_msg = f"[FW] Found {len(lines)} blocked addresses"
-            print(fw_log_msg)
+            print(f"[FW] Found {len(lines)} blocked entries")
             for ip_part in lines:
-                if '/32' in ip_part:
-                    new_set.add(ip_part.split('/')[0])
-                elif '/' in ip_part:
-                    new_set.add(ip_part)
+                new_set.add(ip_part)  # Always store raw string for display
+                if '-' in ip_part and '.' in ip_part:
+                    # IP range: 34.0.0.0-34.0.255.255
                     try:
-                        new_nets.append(ipaddress.ip_network(ip_part, strict=False))
+                        parts = ip_part.split('-')
+                        start = int(ipaddress.ip_address(parts[0].strip()))
+                        end = int(ipaddress.ip_address(parts[1].strip()))
+                        new_ranges.append((start, end))
                     except:
                         pass
-                else:
-                    new_set.add(ip_part)
+                elif '/' in ip_part:
+                    # CIDR or subnet mask: 34.166.0.0/255.255.0.0 or 34.166.0.0/16
+                    try:
+                        net = ipaddress.ip_network(ip_part, strict=False)
+                        if net.prefixlen == 32:
+                            new_set.add(str(net.network_address))
+                        else:
+                            new_nets.append(net)
+                    except:
+                        pass
+                # else: plain IP — already in new_set
         elif result.returncode != 0:
             print(f"[FW] PowerShell error (code {result.returncode}): {(result.stderr or '')[:300]}")
         else:
@@ -848,6 +865,7 @@ def refresh_fw_cache():
             pass
     all_fw_blocked = new_set
     all_fw_networks = new_nets
+    all_fw_ranges = new_ranges
     fw_cache_time = now
 
 # ─── Connection Scanner ───
@@ -2874,6 +2892,9 @@ def api_fw_debug():
             ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
             capture_output=True, text=True, timeout=30
         )
+        # Test matching against a sample IP
+        test_ip = request.args.get('test', '')
+        test_result = is_fw_blocked(test_ip) if test_ip else None
         return jsonify({
             "returncode": result.returncode,
             "stdout": result.stdout[:5000],
@@ -2881,7 +2902,12 @@ def api_fw_debug():
             "blocked_ips_internal": list(blocked_ips)[:50],
             "all_fw_blocked_count": len(all_fw_blocked),
             "all_fw_networks_count": len(all_fw_networks),
+            "all_fw_ranges_count": len(all_fw_ranges),
             "all_fw_blocked_sample": list(all_fw_blocked)[:20],
+            "all_fw_networks": [str(n) for n in all_fw_networks],
+            "all_fw_ranges": [f"{ipaddress.ip_address(s)}-{ipaddress.ip_address(e)}" for s, e in all_fw_ranges],
+            "test_ip": test_ip,
+            "test_blocked": test_result,
         })
     except Exception as e:
         return jsonify({"error": str(e)})
