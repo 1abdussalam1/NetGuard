@@ -51,9 +51,9 @@ VERSION = "5.1.0"
 UPDATE_URL = "https://raw.githubusercontent.com/1abdussalam1/NetGuard/main/version.json"
 NPCAP_URL = "https://npcap.com/dist/npcap-1.80.exe"
 
-# ─── Auto-install Npcap (bundled inside EXE) ───
+# ─── Auto-install Npcap (downloaded if needed) ───
 def check_npcap():
-    """Check if Npcap is installed. Extract bundled installer if needed."""
+    """Check if Npcap is installed. Download and install silently if not."""
     if os.name != 'nt':
         return True
     npcap_paths = [
@@ -64,40 +64,27 @@ def check_npcap():
         print("[OK] Npcap found")
         return True
 
-    print("[!] Npcap not found — installing...")
+    print("[!] Npcap not found — downloading and installing...")
     try:
-        # Find bundled npcap installer
-        if getattr(sys, 'frozen', False):
-            bundled = os.path.join(sys._MEIPASS, 'npcap-installer.exe')
-        else:
-            bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'npcap-installer.exe')
+        npcap_installer = os.path.join(os.environ.get('TEMP', '.'), 'npcap_setup.exe')
+        # Download from official site
+        import urllib.request
+        req = urllib.request.Request(NPCAP_URL, headers={"User-Agent": "NetGuard/" + VERSION})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            with open(npcap_installer, 'wb') as f:
+                f.write(resp.read())
 
-        tmp_installer = os.path.join(os.environ.get('TEMP', '.'), 'npcap_setup.exe')
-
-        if os.path.exists(bundled):
-            import shutil
-            shutil.copy2(bundled, tmp_installer)
-        else:
-            # Fallback: download
-            print("[*] Downloading Npcap...")
-            dl_cmd = (
-                f'powershell -NoProfile -WindowStyle Hidden -Command '
-                f'"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; '
-                f'Invoke-WebRequest -Uri \'{NPCAP_URL}\' -OutFile \'{tmp_installer}\'"'
-            )
-            subprocess.run(dl_cmd, shell=True, timeout=120)
-
-        if os.path.exists(tmp_installer) and os.path.getsize(tmp_installer) > 100000:
+        if os.path.exists(npcap_installer) and os.path.getsize(npcap_installer) > 100000:
             print("[*] Installing Npcap silently...")
-            subprocess.run([tmp_installer, '/S', '/winpcap_mode=yes'], timeout=120)
+            subprocess.run([npcap_installer, '/S', '/winpcap_mode=yes'], timeout=120)
             print("[OK] Npcap installed!")
             try:
-                os.remove(tmp_installer)
+                os.remove(npcap_installer)
             except:
                 pass
             return True
         else:
-            print("[!] Npcap installer not available.")
+            print("[!] Download failed.")
             return False
     except Exception as e:
         print(f"[!] Npcap install failed: {e}")
