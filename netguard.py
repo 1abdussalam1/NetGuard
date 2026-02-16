@@ -226,6 +226,7 @@ FIREWALL_RULE_PREFIX = "NetGuard_"
 
 # ─── State ───
 monitoring = False
+last_heartbeat = time.time()  # Browser heartbeat — auto-shutdown if no ping
 session_ips = {}       # ip -> {first_seen, ports, process, active, hit_count, ...}
 blocked_ips = set()    # NetGuard's own tracked blocks
 all_fw_blocked = set() # ALL blocked IPs from Windows Firewall (all sources)
@@ -2565,8 +2566,9 @@ function openUpdate() {
 log('🛡️ NetGuard v5.1 ready — auto-starting monitor...');
 // Auto-start monitoring on page load
 setTimeout(() => toggleMonitor(), 500);
-// Check for updates after 3 seconds
 setTimeout(() => checkUpdate(), 3000);
+// Heartbeat — keeps server alive, auto-exits when browser closes
+setInterval(() => fetch('/api/heartbeat').catch(()=>{}), 5000);
 </script>
 </body>
 </html>
@@ -2983,6 +2985,22 @@ def api_sniffer_status():
         total_packets = sum(s["packet_count"] for s in sniffed_ips.values())
     return jsonify({"active": sniffer_active, "ips_found": count, "total_packets": total_packets})
 
+@app.route('/api/heartbeat')
+def api_heartbeat():
+    """Browser pings this every 5s. If no ping for 30s, server auto-exits."""
+    global last_heartbeat
+    last_heartbeat = time.time()
+    return jsonify({"ok": True})
+
+def auto_shutdown_watcher():
+    """Kill server if browser disconnects (no heartbeat for 30s)."""
+    while True:
+        time.sleep(10)
+        if time.time() - last_heartbeat > 30:
+            print("[*] Browser disconnected — shutting down...")
+            save_blocked()
+            os._exit(0)
+
 @app.route('/api/shutdown', methods=['POST'])
 def api_shutdown():
     """Shutdown NetGuard from the dashboard."""
@@ -3022,6 +3040,9 @@ if __name__ == '__main__':
 
         # Load cloud IP ranges in background
         threading.Thread(target=load_cloud_ip_ranges, daemon=True).start()
+
+        # Auto-shutdown if browser disconnects
+        threading.Thread(target=auto_shutdown_watcher, daemon=True).start()
 
         # Hide console window after 3 seconds
         threading.Timer(3.0, hide_console).start()
