@@ -15,6 +15,9 @@ import subprocess
 
 # ─── Check dependencies FIRST (before anything else) ───
 def check_deps():
+    # Skip dependency check when running as PyInstaller EXE (everything is bundled)
+    if getattr(sys, 'frozen', False):
+        return
     missing = []
     try:
         import psutil
@@ -156,7 +159,11 @@ def is_admin():
 
 if os.name == 'nt' and not is_admin():
     import ctypes
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{os.path.abspath(__file__)}"', None, 1)
+    if getattr(sys, 'frozen', False):
+        # PyInstaller EXE — re-run the EXE itself as admin
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "", None, 1)
+    else:
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{os.path.abspath(__file__)}"', None, 1)
     sys.exit(0)
 
 # ─── Open as standalone app window (not browser tab) ───
@@ -2527,7 +2534,7 @@ def api_connections():
     result = []
     with monitor_lock:
         for ip, info in session_ips.items():
-            geo = ip_ip_geo_cache.get(ip, {})
+            geo = ip_geo_cache.get(ip, {})
             ping_info = ip_ping_cache.get(ip, {})
             ports = sorted(info.get("ports", set()))
             protos = info.get("protos", set())
