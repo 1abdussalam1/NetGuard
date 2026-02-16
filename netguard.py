@@ -2658,6 +2658,51 @@ def api_connections():
                 "bw_in": bw_in,
                 "bw_out": bw_out,
             })
+
+    # Inject blocked IPs not in session_ips (so "Blocked Only" filter works)
+    seen_ips = {r["ip"] for r in result}
+    for blocked_entry in all_fw_blocked:
+        # Skip CIDR/range strings — only inject plain IPs
+        if '/' in blocked_entry or '-' in blocked_entry:
+            continue
+        if blocked_entry in seen_ips:
+            continue
+        if is_private(blocked_entry):
+            continue
+        geo = ip_geo_cache.get(blocked_entry, {})
+        loc_parts = []
+        if geo.get("city"): loc_parts.append(geo["city"])
+        if geo.get("region_name") and geo.get("region_name") != geo.get("city"):
+            loc_parts.append(geo["region_name"])
+        result.append({
+            "ip": blocked_entry,
+            "ports": "—",
+            "country": geo.get("country", "??"),
+            "country_name": geo.get("country_name", ""),
+            "city": geo.get("city", ""),
+            "location": ", ".join(loc_parts) if loc_parts else "",
+            "isp": geo.get("isp", ""),
+            "flag": geo.get("flag", "❓"),
+            "is_me": False,
+            "region": geo.get("region", "Other"),
+            "hosting": geo.get("hosting", False),
+            "org": geo.get("org", ""),
+            "timezone": geo.get("timezone", ""),
+            "lat": geo.get("lat", 0),
+            "lon": geo.get("lon", 0),
+            "process": "🚫 Blocked",
+            "is_game": False,
+            "active": False,
+            "first_seen": "",
+            "last_seen": "",
+            "blocked": True,
+            "hit_count": 0,
+            "ping": None,
+            "bw_in": 0,
+            "bw_out": 0,
+        })
+        seen_ips.add(blocked_entry)
+
     return jsonify(result)
 
 @app.route('/api/processes')
