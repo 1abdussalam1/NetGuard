@@ -170,6 +170,16 @@ if os.name == 'nt' and not is_admin():
 def open_app_window(port):
     """Open NetGuard in a standalone window using Edge/Chrome --app mode."""
     url = f'http://localhost:{port}'
+
+    # Wait until Flask is actually listening
+    import urllib.request
+    for _ in range(20):  # Try for up to 10 seconds
+        try:
+            urllib.request.urlopen(f'http://127.0.0.1:{port}/api/version', timeout=1)
+            break
+        except:
+            time.sleep(0.5)
+
     if os.name == 'nt':
         # Try Microsoft Edge first (built into Windows 10/11)
         edge_paths = [
@@ -2990,31 +3000,35 @@ def api_shutdown():
 if __name__ == '__main__':
     try:
         load_blocked()
-        print(f"""
-    ╔══════════════════════════════════════╗
-    ║  🛡️  NetGuard v4.0                   ║
-    ║  Game Network Monitor & IP Blocker   ║
-    ║  Designed by WillyNilly              ║
-    ║                                      ║
-    ║  🎮 Process Filter                   ║
-    ║  📡 Live Ping / Latency (ICMP)       ║
-    ║  🌍 Region Filter                    ║
-    ║  📊 Bandwidth Tracking               ║
-    ║  ☁️  Cloud IP Range Detection         ║
-    ║                                      ║
-    ║  Open: http://localhost:{PORT}          ║
-    ║  Press Ctrl+C to stop                ║
-    ╚══════════════════════════════════════╝
-        """)
-        # Load cloud IP ranges in background (Google Cloud + AWS)
-        print("[*] Loading cloud provider IP ranges...")
+
+        # Find a free port (try PORT first, then PORT+1, PORT+2...)
+        actual_port = PORT
+        for offset in range(10):
+            test_port = PORT + offset
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.bind(('127.0.0.1', test_port))
+                s.close()
+                actual_port = test_port
+                break
+            except OSError:
+                continue
+
+        print(f"\n  NetGuard v{VERSION}")
+        print(f"  Game Network Monitor & IP Blocker")
+        print(f"  Designed by WillyNilly")
+        print(f"\n  Open: http://localhost:{actual_port}")
+        print(f"  Press Ctrl+C to stop\n")
+
+        # Load cloud IP ranges in background
         threading.Thread(target=load_cloud_ip_ranges, daemon=True).start()
 
-        # Hide console window after 2 seconds (let it show startup info briefly)
-        threading.Timer(2.0, hide_console).start()
+        # Hide console window after 3 seconds
+        threading.Timer(3.0, hide_console).start()
 
-        threading.Timer(1.5, lambda: open_app_window(PORT)).start()
-        app.run(host='127.0.0.1', port=PORT, debug=False, use_reloader=False)
+        # Open browser AFTER Flask starts (waits for server to be ready)
+        threading.Timer(0.5, lambda: open_app_window(actual_port)).start()
+        app.run(host='127.0.0.1', port=actual_port, debug=False, use_reloader=False)
     except Exception as e:
         print(f"\n{'='*50}")
         print(f"[ERROR] NetGuard crashed!")
