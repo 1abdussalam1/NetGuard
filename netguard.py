@@ -159,6 +159,38 @@ if os.name == 'nt' and not is_admin():
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{os.path.abspath(__file__)}"', None, 1)
     sys.exit(0)
 
+# ─── Open as standalone app window (not browser tab) ───
+def open_app_window(port):
+    """Open NetGuard in a standalone window using Edge/Chrome --app mode."""
+    url = f'http://localhost:{port}'
+    if os.name == 'nt':
+        # Try Microsoft Edge first (built into Windows 10/11)
+        edge_paths = [
+            os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            os.path.join(os.environ.get('ProgramFiles', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            os.path.join(os.environ.get('LocalAppData', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ]
+        for edge in edge_paths:
+            if os.path.exists(edge):
+                subprocess.Popen([edge, f'--app={url}', '--new-window',
+                                  f'--window-size=1400,900', '--disable-extensions'])
+                return
+
+        # Try Chrome
+        chrome_paths = [
+            os.path.join(os.environ.get('ProgramFiles', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            os.path.join(os.environ.get('LocalAppData', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        ]
+        for chrome in chrome_paths:
+            if os.path.exists(chrome):
+                subprocess.Popen([chrome, f'--app={url}', '--new-window',
+                                  f'--window-size=1400,900', '--disable-extensions'])
+                return
+
+    # Fallback: regular browser
+    webbrowser.open(url)
+
 # ─── Hide console window on Windows (runs in background) ───
 def hide_console():
     if os.name == 'nt':
@@ -2831,7 +2863,7 @@ if __name__ == '__main__':
         # Hide console window after 2 seconds (let it show startup info briefly)
         threading.Timer(2.0, hide_console).start()
 
-        threading.Timer(1.5, lambda: webbrowser.open(f'http://localhost:{PORT}')).start()
+        threading.Timer(1.5, lambda: open_app_window(PORT)).start()
         app.run(host='127.0.0.1', port=PORT, debug=False, use_reloader=False)
     except Exception as e:
         print(f"\n{'='*50}")
