@@ -219,6 +219,7 @@ monitoring = False
 session_ips = {}       # ip -> {first_seen, ports, process, active, hit_count, ...}
 blocked_ips = set()    # NetGuard's own tracked blocks
 all_fw_blocked = set() # ALL blocked IPs from Windows Firewall (all sources)
+all_fw_networks = []   # CIDR networks from firewall (for range matching)
 fw_cache_time = 0      # Last time we scanned the firewall
 ip_geo_cache = {}      # ip -> {country, city, isp, flag, is_me, region, ...}
 ip_ping_cache = {}     # ip -> {latency_ms, last_check}
@@ -409,6 +410,20 @@ def lookup_cloud_ip(ip_str):
     return None
 
 # ─── Helpers ───
+def is_fw_blocked(ip):
+    """Check if an IP is blocked — exact match OR falls within a CIDR range."""
+    if ip in blocked_ips or ip in all_fw_blocked:
+        return True
+    # Check CIDR networks
+    try:
+        addr = ipaddress.ip_address(ip)
+        for net in all_fw_networks:
+            if addr in net:
+                return True
+    except:
+        pass
+    return False
+
 def is_private(ip):
     try:
         p = ip.split(".")
@@ -759,14 +774,15 @@ def save_blocked():
 
 def refresh_fw_cache():
     """Scan ALL firewall block rules using PowerShell (language-independent)."""
-    global all_fw_blocked, fw_cache_time
+    global all_fw_blocked, all_fw_networks, fw_cache_time
     now = time.time()
     # Don't scan more than once every 5 seconds
     if now - fw_cache_time < 5:
         return
     new_set = set(blocked_ips)  # Start with NetGuard's own list
+    new_nets = []               # CIDR networks
     try:
-        # PowerShell gives us clean JSON — works on any Windows language
+        # PowerShell gives us clean output — works on any Windows language
         ps_cmd = (
             'powershell -NoProfile -Command "'
             'Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue | '
@@ -782,13 +798,24 @@ def refresh_fw_cache():
         if result.returncode == 0:
             for line in result.stdout.strip().split('\n'):
                 ip_part = line.strip()
-                if ip_part:
-                    # Clean up /32 suffixes
-                    clean = ip_part.split('/')[0] if '/32' in ip_part else ip_part
-                    new_set.add(clean)
+                if not ip_part:
+                    continue
+                if '/32' in ip_part:
+                    # Single IP with /32 suffix — treat as plain IP
+                    new_set.add(ip_part.split('/')[0])
+                elif '/' in ip_part:
+                    # CIDR range (e.g. 34.0.64.0/19) — store as network
+                    new_set.add(ip_part)  # Keep string for display
+                    try:
+                        new_nets.append(ipaddress.ip_network(ip_part, strict=False))
+                    except:
+                        pass
+                else:
+                    new_set.add(ip_part)
     except:
-        # Fallback: try netsh with flexible parsing (works on English Windows)
+        # Fallback: try netsh with flexible parsing
         try:
+            import re
             for direction in ["out", "in"]:
                 result = subprocess.run(
                     f'netsh advfirewall firewall show rule name=all dir={direction}',
@@ -798,23 +825,27 @@ def refresh_fw_cache():
                 found_block = False
                 for line in lines:
                     line = line.strip()
-                    # Detect block action (any language — look for "Block" keyword)
-                    if 'Block' in line or 'block' in line or 'حظر' in line:
+                    if 'Block' in line or 'block' in line:
                         found_block = True
-                    # Detect new rule start (separator line)
                     if line.startswith('---') or (not line and found_block):
                         found_block = False
-                    # Look for IP addresses on any line after a Block action
                     if found_block:
-                        import re
                         ips_found = re.findall(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:/\d{1,2})?)', line)
                         for ip in ips_found:
-                            clean = ip.split('/')[0] if '/32' in ip else ip
-                            if clean not in ('0.0.0.0', '127.0.0.1', '255.255.255.255'):
-                                new_set.add(clean)
+                            if '/32' in ip:
+                                new_set.add(ip.split('/')[0])
+                            elif '/' in ip:
+                                new_set.add(ip)
+                                try:
+                                    new_nets.append(ipaddress.ip_network(ip, strict=False))
+                                except:
+                                    pass
+                            elif ip not in ('0.0.0.0', '127.0.0.1', '255.255.255.255'):
+                                new_set.add(ip)
         except:
             pass
     all_fw_blocked = new_set
+    all_fw_networks = new_nets
     fw_cache_time = now
 
 # ─── Connection Scanner ───
@@ -2600,7 +2631,7 @@ def api_connections():
                 "active": info.get("active", False),
                 "first_seen": info.get("first_seen", ""),
                 "last_seen": info.get("last_seen", ""),
-                "blocked": ip in blocked_ips or ip in all_fw_blocked,
+                "blocked": is_fw_blocked(ip),
                 "hit_count": info.get("hit_count", 0),
                 "ping": ping_ms,
                 "bw_in": bw_in,
