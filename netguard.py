@@ -51,48 +51,56 @@ VERSION = "5.1.0"
 UPDATE_URL = "https://raw.githubusercontent.com/1abdussalam1/NetGuard/main/version.json"
 NPCAP_URL = "https://npcap.com/dist/npcap-1.80.exe"
 
-# ─── Auto-install Npcap (silent, hidden PowerShell) ───
+# ─── Auto-install Npcap (bundled inside EXE) ───
 def check_npcap():
-    """Check if Npcap is installed, auto-download and install if not."""
+    """Check if Npcap is installed. Extract bundled installer if needed."""
     if os.name != 'nt':
         return True
-    # Check common Npcap locations
     npcap_paths = [
         os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'Npcap', 'wpcap.dll'),
         os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'SysWOW64', 'Npcap', 'wpcap.dll'),
     ]
     if any(os.path.exists(p) for p in npcap_paths):
-        print("[✓] Npcap found")
+        print("[OK] Npcap found")
         return True
 
-    print("[!] Npcap not found — downloading and installing...")
+    print("[!] Npcap not found — installing...")
     try:
-        npcap_installer = os.path.join(os.environ.get('TEMP', '.'), 'npcap_installer.exe')
-        # Download silently via PowerShell (hidden window)
-        dl_cmd = (
-            f'powershell -NoProfile -WindowStyle Hidden -Command '
-            f'"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; '
-            f'Invoke-WebRequest -Uri \'{NPCAP_URL}\' -OutFile \'{npcap_installer}\'"'
-        )
-        subprocess.run(dl_cmd, shell=True, timeout=120)
+        # Find bundled npcap installer
+        if getattr(sys, 'frozen', False):
+            bundled = os.path.join(sys._MEIPASS, 'npcap-installer.exe')
+        else:
+            bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'npcap-installer.exe')
 
-        if os.path.exists(npcap_installer) and os.path.getsize(npcap_installer) > 100000:
-            # Install silently
+        tmp_installer = os.path.join(os.environ.get('TEMP', '.'), 'npcap_setup.exe')
+
+        if os.path.exists(bundled):
+            import shutil
+            shutil.copy2(bundled, tmp_installer)
+        else:
+            # Fallback: download
+            print("[*] Downloading Npcap...")
+            dl_cmd = (
+                f'powershell -NoProfile -WindowStyle Hidden -Command '
+                f'"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; '
+                f'Invoke-WebRequest -Uri \'{NPCAP_URL}\' -OutFile \'{tmp_installer}\'"'
+            )
+            subprocess.run(dl_cmd, shell=True, timeout=120)
+
+        if os.path.exists(tmp_installer) and os.path.getsize(tmp_installer) > 100000:
             print("[*] Installing Npcap silently...")
-            subprocess.run([npcap_installer, '/S', '/winpcap_mode=yes'], timeout=120)
-            print("[✓] Npcap installed!")
-            # Cleanup
+            subprocess.run([tmp_installer, '/S', '/winpcap_mode=yes'], timeout=120)
+            print("[OK] Npcap installed!")
             try:
-                os.remove(npcap_installer)
+                os.remove(tmp_installer)
             except:
                 pass
             return True
         else:
-            print("[!] Npcap download failed. Packet capture will be limited.")
+            print("[!] Npcap installer not available.")
             return False
     except Exception as e:
-        print(f"[!] Npcap auto-install failed: {e}")
-        print("[!] Download manually from https://npcap.com/")
+        print(f"[!] Npcap install failed: {e}")
         return False
 
 # ─── Auto-Update Checker ───
