@@ -671,21 +671,23 @@ def measure_ping(ip, timeout=1.5):
             try: sock.close()
             except: pass
 
-    # FALLBACK 3: PowerShell Test-NetConnection (last resort)
-    if os.name == 'nt':
-        try:
-            r = subprocess.run(
-                ['powershell', '-NoProfile', '-Command',
-                 f'(Test-NetConnection {ip} -Port 443 -WarningAction SilentlyContinue).PingReplyDetails.RoundtripTime'],
-                capture_output=True, text=True, timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-            )
-            if r.returncode == 0 and r.stdout.strip().isdigit():
-                ms = int(r.stdout.strip())
-                if ms > 0:
-                    return ms
-        except:
-            pass
+    # FALLBACK 3: Scapy TCP SYN ping (same technique as games)
+    # Send SYN → measure time for SYN-ACK or RST → that's the real latency
+    try:
+        from scapy.all import IP as ScapyIP, TCP as ScapyTCP, sr1 as scapy_sr1, conf as scapy_conf
+        scapy_conf.verb = 0
+        for port in [80, 443, 3478]:
+            try:
+                pkt = ScapyIP(dst=ip) / ScapyTCP(dport=port, flags='S')
+                start = time.perf_counter()
+                reply = scapy_sr1(pkt, timeout=2, verbose=0)
+                elapsed = (time.perf_counter() - start) * 1000
+                if reply:
+                    return round(elapsed, 1)
+            except:
+                continue
+    except:
+        pass
     return None
 
 def ping_worker():
