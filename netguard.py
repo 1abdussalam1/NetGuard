@@ -64,7 +64,7 @@ def check_npcap():
         print("[OK] Npcap found")
         return True
 
-    print("[!] Npcap not found — downloading and installing...")
+    print("[!] Npcap not found - downloading and installing...")
     try:
         npcap_installer = os.path.join(os.environ.get('TEMP', '.'), 'npcap_setup.exe')
         # Download from official site
@@ -111,18 +111,18 @@ def check_for_updates():
                 }
                 print(f"[!] Update available: v{latest} (current: v{VERSION})")
             else:
-                print(f"[✓] NetGuard is up to date (v{VERSION})")
+                print(f"[OK] NetGuard is up to date (v{VERSION})")
     except:
-        pass  # Silent fail — no internet or no repo yet
+        pass  # Silent fail - no internet or no repo yet
 
 # ─── Startup Checks (run once) ───
 def startup_checks():
     """Run all startup checks: Npcap, updates, dependencies."""
-    print(f"\n🛡️ NetGuard v{VERSION} — Starting up...")
+    print(f"\nNetGuard v{VERSION} - Starting up...")
     print("=" * 50)
     # 1. Check Npcap
     check_npcap()
-    # 2. Check for updates (background thread — don't block startup)
+    # 2. Check for updates (background thread - don't block startup)
     threading.Thread(target=check_for_updates, daemon=True).start()
     print("=" * 50)
     print()
@@ -155,7 +155,7 @@ def is_admin():
 if os.name == 'nt' and not is_admin():
     import ctypes
     if getattr(sys, 'frozen', False):
-        # PyInstaller EXE — re-run the EXE itself as admin
+        # PyInstaller EXE - re-run the EXE itself as admin
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "", None, 1)
     else:
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{os.path.abspath(__file__)}"', None, 1)
@@ -221,7 +221,7 @@ FIREWALL_RULE_PREFIX = "NetGuard_"
 
 # ─── State ───
 monitoring = False
-last_heartbeat = time.time()  # Browser heartbeat — auto-shutdown if no ping
+last_heartbeat = time.time()  # Browser heartbeat - auto-shutdown if no ping
 session_ips = {}       # ip -> {first_seen, ports, process, active, hit_count, ...}
 blocked_ips = set()    # NetGuard's own tracked blocks
 all_fw_blocked = set() # ALL blocked IPs from Windows Firewall (all sources)
@@ -363,9 +363,9 @@ def load_cloud_ip_ranges():
                         ranges.append((net, scope, "Google Cloud"))
                     except:
                         pass
-        print(f"    ✓ Google Cloud: {sum(1 for r in ranges if r[2]=='Google Cloud')} ranges")
+        print(f"    + Google Cloud: {sum(1 for r in ranges if r[2]=='Google Cloud')} ranges")
     except Exception as e:
-        print(f"    ✗ Google Cloud failed: {e}")
+        print(f"    x Google Cloud failed: {e}")
 
     # ── AWS ──
     try:
@@ -384,9 +384,9 @@ def load_cloud_ip_ranges():
                         ranges.append((net, region, "AWS"))
                     except:
                         pass
-        print(f"    ✓ AWS: {len(ranges) - aws_count_before} ranges")
+        print(f"    + AWS: {len(ranges) - aws_count_before} ranges")
     except Exception as e:
-        print(f"    ✗ AWS failed: {e}")
+        print(f"    x AWS failed: {e}")
 
     cloud_ip_ranges = ranges
     cloud_ranges_loaded = True
@@ -418,7 +418,7 @@ def lookup_cloud_ip(ip_str):
 
 # ─── Helpers ───
 def is_fw_blocked(ip):
-    """Check if an IP is blocked — exact match, CIDR/subnet, or IP range."""
+    """Check if an IP is blocked - exact match, CIDR/subnet, or IP range."""
     if ip in blocked_ips or ip in all_fw_blocked:
         return True
     try:
@@ -543,7 +543,7 @@ def geo_lookup(ip):
                 "ZA":"South Africa","NG":"Nigeria","AR":"Argentina","CL":"Chile","CO":"Colombia"}
 
             if is_cdn:
-                # CDN Anycast — GeoIP location is UNRELIABLE, show as CDN
+                # CDN Anycast - GeoIP location is UNRELIABLE, show as CDN
                 ip_geo_cache[ip] = {
                     "country": "CDN", "country_name": f"☁️ {cdn_name} Anycast",
                     "city": f"Nearest {cdn_name} PoP", "region_name": "",
@@ -743,7 +743,7 @@ _RANGE_PATTERN = _re.compile(r'^(\d{1,3}\.){3}\d{1,3}-(\d{1,3}\.){3}\d{1,3}$')
 _SAFE_RULE_NAME = _re.compile(r'^[A-Za-z0-9_.\-\s()®]+$')
 
 def is_valid_ip_input(ip):
-    """Validate IP, CIDR, or IP range — prevents command injection."""
+    """Validate IP, CIDR, or IP range - prevents command injection."""
     ip = ip.strip()
     if _IP_PATTERN.match(ip):
         parts = ip.split('.')
@@ -818,7 +818,7 @@ def refresh_fw_cache():
     new_nets = []               # CIDR/subnet networks
     new_ranges = []             # IP ranges as (start_int, end_int)
     try:
-        # PowerShell batch query — list args (no shell quoting issues)
+        # PowerShell batch query - list args (no shell quoting issues)
         ps_script = (
             'Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue | '
             'Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue | '
@@ -854,11 +854,11 @@ def refresh_fw_cache():
                             new_nets.append(net)
                     except:
                         pass
-                # else: plain IP — already in new_set
+                # else: plain IP - already in new_set
         elif result.returncode != 0:
             print(f"[FW] PowerShell error (code {result.returncode}): {(result.stderr or '')[:300]}")
         else:
-            print("[FW] PowerShell returned empty — no block rules found")
+            print("[FW] PowerShell returned empty - no block rules found")
     except Exception as e:
         print(f"[FW] Exception: {e}")
         # Fallback: try netsh with flexible parsing
@@ -933,11 +933,11 @@ def scan_connections():
         pass
     return conns
 
-# ─── Scapy Packet Sniffer (captures ALL traffic — TCP + UDP + everything) ───
+# ─── Scapy Packet Sniffer (captures ALL traffic - TCP + UDP + everything) ───
 sniffed_ips = {}  # ip -> {last_seen, ports, proto, packet_count, bytes_in, bytes_out, process, pid}
 sniffer_lock = threading.Lock()
 sniffer_active = False
-local_port_map = {}  # local_port -> (process_name, pid)  — updated periodically
+local_port_map = {}  # local_port -> (process_name, pid)  - updated periodically
 port_map_lock = threading.Lock()
 
 def get_local_ips():
@@ -976,14 +976,14 @@ def port_map_updater():
         time.sleep(0.5)  # Update every 500ms for fast matching
 
 def packet_sniffer():
-    """Scapy packet sniffer — captures ALL packets like Resource Monitor/Wireshark."""
+    """Scapy packet sniffer - captures ALL packets like Resource Monitor/Wireshark."""
     global monitoring, sniffer_active
 
     try:
         from scapy.all import sniff as scapy_sniff, IP, TCP, UDP, conf
         conf.verb = 0
     except ImportError:
-        print("[!] scapy not available — packet sniffer disabled")
+        print("[!] scapy not available - packet sniffer disabled")
         return
 
     local_ips = get_local_ips()
@@ -1074,7 +1074,7 @@ def packet_sniffer():
                 entry["bytes_out"] += pkt_len
 
     try:
-        print("[*] Scapy sniffer active ✓ — capturing all packets")
+        print("[*] Scapy sniffer active - capturing all packets")
         scapy_sniff(
             prn=process_packet,
             store=False,
@@ -2085,7 +2085,7 @@ td.country-me {
     <!-- Block Manager Panel -->
     <div id="blockManager" class="card animate-in" style="display:none; margin-top:1rem; padding:1.25rem;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-            <h3 style="margin:0; font-size:1.1rem; color:var(--text-1);">🛡️ Block Manager — Firewall Rules</h3>
+            <h3 style="margin:0; font-size:1.1rem; color:var(--text-1);">🛡️ Block Manager - Firewall Rules</h3>
             <div style="display:flex; gap:0.5rem;">
                 <button class="btn btn-unblock" onclick="unblockAllBlocks()" style="font-size:0.8rem;">✅ Unblock All</button>
                 <button class="btn btn-block" onclick="unblockSelectedBlocks()" style="font-size:0.8rem;">🔓 Unblock Selected</button>
@@ -2257,7 +2257,7 @@ function formatBW(bytes) {
 
 // ─── Ping Display ───
 function pingHtml(ms) {
-    if (ms === null || ms === undefined) return '<span class="ping-na">—</span>';
+    if (ms === null || ms === undefined) return '<span class="ping-na">-</span>';
     let cls = 'ping-good';
     if (ms > 100) cls = 'ping-bad';
     else if (ms > 60) cls = 'ping-ok';
@@ -2300,7 +2300,7 @@ function refreshTable() {
         return 0;
     });
 
-    // Stats — KPI cards (numbers only)
+    // Stats - KPI cards (numbers only)
     const totalCount = data.length;
     const meCount = data.filter(c=>c.is_me).length;
     const blockedCount = data.filter(c=>c.blocked).length;
@@ -2311,7 +2311,7 @@ function refreshTable() {
     document.getElementById('statsBlocked').textContent = blockedCount;
     document.getElementById('statsActive').textContent = activeCount;
 
-    // Stats — filter bar (with labels)
+    // Stats - filter bar (with labels)
     document.getElementById('statsTotal2').textContent = totalCount + ' IPs';
     document.getElementById('statsME2').textContent = meCount + ' ME';
     document.getElementById('statsBlocked2').textContent = blockedCount + ' blocked';
@@ -2350,8 +2350,8 @@ function refreshTable() {
             <td style="font-size:0.78rem">${c.location || c.city || ''}</td>
             <td style="color:var(--text-3);font-size:0.72rem">${c.region || ''}</td>
             <td class="process">${c.process}</td>
-            <td class="bw bw-in">${c.bw_in ? formatBW(c.bw_in) : '—'}</td>
-            <td class="bw bw-out">${c.bw_out ? formatBW(c.bw_out) : '—'}</td>
+            <td class="bw bw-in">${c.bw_in ? formatBW(c.bw_in) : '-'}</td>
+            <td class="bw bw-out">${c.bw_out ? formatBW(c.bw_out) : '-'}</td>
             <td style="color:var(--text-3)">${c.first_seen}</td>
             <td>${actionBtn}</td>
         </tr>`;
@@ -2486,8 +2486,8 @@ async function refreshBlockList() {
                 <td><input type="checkbox" class="block-cb" value="${b.rule_name || b.ip}" data-ip="${b.ip}" onchange="toggleBlockSelect(this)"></td>
                 <td style="font-family:'JetBrains Mono',monospace; font-weight:600; color:var(--danger);">${b.ip}</td>
                 <td>${flag} ${b.country}</td>
-                <td>${b.city || '—'}</td>
-                <td>${b.region || '—'}</td>
+                <td>${b.city || '-'}</td>
+                <td>${b.region || '-'}</td>
                 <td>${srcBadge}</td>
                 <td><button class="btn btn-unblock" style="font-size:0.75rem; padding:0.25rem 0.6rem;" onclick="unblockOneRule('${b.ip}','${(b.rule_name||'').replace(/'/g,"\\'")}')">🔓 Unblock</button></td>
             </tr>`;
@@ -2573,7 +2573,7 @@ async function checkUpdate() {
             updateUrl = d.download_url;
             document.getElementById('updateBanner').style.display = 'inline-block';
             document.getElementById('updateBanner').textContent = `🔄 v${d.latest} Available!`;
-            log(`🔄 Update available: v${d.latest} — click the banner to download`);
+            log(`🔄 Update available: v${d.latest} - click the banner to download`);
         }
     } catch(e) {}
 }
@@ -2581,11 +2581,11 @@ function openUpdate() {
     if (updateUrl) window.open(updateUrl, '_blank');
 }
 
-log('🛡️ NetGuard v5.1 ready — auto-starting monitor...');
+log('🛡️ NetGuard v5.1 ready - auto-starting monitor...');
 // Auto-start monitoring on page load
 setTimeout(() => toggleMonitor(), 500);
 setTimeout(() => checkUpdate(), 3000);
-// Heartbeat — keeps server alive, auto-exits when browser closes
+// Heartbeat - keeps server alive, auto-exits when browser closes
 setInterval(() => fetch('/api/heartbeat').catch(()=>{}), 5000);
 </script>
 </body>
@@ -2632,7 +2632,7 @@ def api_connections():
             proc = info.get("process", "")
             pid = info.get("pid")
 
-            # Get bandwidth — prefer real sniffed bytes, fallback to process estimate
+            # Get bandwidth - prefer real sniffed bytes, fallback to process estimate
             bw_in = 0
             bw_out = 0
             if info.get("sniffed") and (info.get("bytes_in", 0) > 0 or info.get("bytes_out", 0) > 0):
@@ -2715,7 +2715,7 @@ def api_connections():
             loc_parts.append(geo["region_name"])
         result.append({
             "ip": blocked_entry,
-            "ports": "—",
+            "ports": "-",
             "country": geo.get("country", "??"),
             "country_name": geo.get("country_name", ""),
             "city": geo.get("city", ""),
@@ -2834,7 +2834,7 @@ def api_blocks():
                 source = "NetGuard" if name.startswith(FIREWALL_RULE_PREFIX) else name
                 blocks.append({
                     "ip": clean_ip,
-                    "country": geo.get("country_name", "—"),
+                    "country": geo.get("country_name", "-"),
                     "cc": geo.get("cc", ""),
                     "city": geo.get("city", ""),
                     "region": geo.get("region", ""),
@@ -2852,7 +2852,7 @@ def api_blocks():
             geo = ip_geo_cache.get(ip, {})
             blocks.append({
                 "ip": ip,
-                "country": geo.get("country_name", "—"),
+                "country": geo.get("country_name", "-"),
                 "cc": geo.get("cc", ""),
                 "city": geo.get("city", ""),
                 "region": geo.get("region", ""),
@@ -3015,7 +3015,7 @@ def auto_shutdown_watcher():
     while True:
         time.sleep(10)
         if time.time() - last_heartbeat > 30:
-            print("[*] Browser disconnected — shutting down...")
+            print("[*] Browser disconnected - shutting down...")
             save_blocked()
             os._exit(0)
 
