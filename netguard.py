@@ -610,7 +610,7 @@ def batch_geo(ips):
 # ─── Ping ───
 import re as _re
 
-def measure_ping(ip, timeout=1.0):
+def measure_ping(ip, timeout=1.5):
     """Measure latency via ICMP ping (real ping, same as game). TCP fallback."""
     # PRIMARY: ICMP ping (same protocol games reference for latency)
     try:
@@ -648,7 +648,7 @@ def measure_ping(ip, timeout=1.0):
             except: pass
 
     # FALLBACK 2: UDP ping (for game servers that only accept UDP)
-    for port in [3478, 3479, 27015, 29523, 443]:
+    for port in [3478, 3479, 27015, 29503, 29523, 20548, 443]:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(timeout)
@@ -656,19 +656,36 @@ def measure_ping(ip, timeout=1.0):
             sock.sendto(b'\x00' * 4, (ip, port))
             try:
                 sock.recvfrom(64)
-            except socket.timeout:
-                pass
-            except OSError:
-                # ICMP port-unreachable = server IS reachable
-                pass
-            elapsed = (time.perf_counter() - start) * 1000
-            sock.close()
-            # If response came back quickly (< timeout), we got a ping
-            if elapsed < timeout * 1000 * 0.9:
+                elapsed = (time.perf_counter() - start) * 1000
+                sock.close()
                 return round(elapsed, 1)
+            except OSError:
+                # ICMP port-unreachable = server IS reachable, measure RTT
+                elapsed = (time.perf_counter() - start) * 1000
+                sock.close()
+                return round(elapsed, 1)
+            except socket.timeout:
+                sock.close()
+                continue  # No response on this port, try next
         except:
             try: sock.close()
             except: pass
+
+    # FALLBACK 3: PowerShell Test-NetConnection (last resort)
+    if os.name == 'nt':
+        try:
+            r = subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 f'(Test-NetConnection {ip} -Port 443 -WarningAction SilentlyContinue).PingReplyDetails.RoundtripTime'],
+                capture_output=True, text=True, timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            if r.returncode == 0 and r.stdout.strip().isdigit():
+                ms = int(r.stdout.strip())
+                if ms > 0:
+                    return ms
+        except:
+            pass
     return None
 
 def ping_worker():
