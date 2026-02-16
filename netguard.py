@@ -45,7 +45,7 @@ import urllib.request
 
 # ─── Version & Update Config ───
 VERSION = "5.1.0"
-UPDATE_URL = "https://raw.githubusercontent.com/WillyNilly-NetGuard/NetGuard/main/version.json"
+UPDATE_URL = "https://raw.githubusercontent.com/1abdussalam1/NetGuard/main/version.json"
 NPCAP_URL = "https://npcap.com/dist/npcap-1.80.exe"
 
 # ─── Auto-install Npcap (silent, hidden PowerShell) ───
