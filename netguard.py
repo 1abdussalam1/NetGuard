@@ -671,23 +671,6 @@ def measure_ping(ip, timeout=1.5):
             try: sock.close()
             except: pass
 
-    # FALLBACK 3: Scapy TCP SYN ping (same technique as games)
-    # Send SYN → measure time for SYN-ACK or RST → that's the real latency
-    try:
-        from scapy.all import IP as ScapyIP, TCP as ScapyTCP, sr1 as scapy_sr1, conf as scapy_conf
-        scapy_conf.verb = 0
-        for port in [80, 443, 3478]:
-            try:
-                pkt = ScapyIP(dst=ip) / ScapyTCP(dport=port, flags='S')
-                start = time.perf_counter()
-                reply = scapy_sr1(pkt, timeout=2, verbose=0)
-                elapsed = (time.perf_counter() - start) * 1000
-                if reply:
-                    return round(elapsed, 1)
-            except:
-                continue
-    except:
-        pass
     return None
 
 def ping_worker():
@@ -954,6 +937,7 @@ def scan_connections():
 
 # ─── Scapy Packet Sniffer (captures ALL traffic - TCP + UDP + everything) ───
 sniffed_ips = {}  # ip -> {last_seen, ports, proto, packet_count, bytes_in, bytes_out, process, pid}
+ip_latency = {}   # ip -> {"last_out": perf_counter, "rtt_ms": float, "samples": [last 5 RTTs]}
 sniffer_lock = threading.Lock()
 sniffer_active = False
 local_port_map = {}  # local_port -> (process_name, pid)  - updated periodically
@@ -1091,6 +1075,23 @@ def packet_sniffer():
                 entry["bytes_in"] += pkt_len
             else:
                 entry["bytes_out"] += pkt_len
+
+        # Real-time latency: measure out→in packet timing per IP
+        now_perf = time.perf_counter()
+        if remote_ip not in ip_latency:
+            ip_latency[remote_ip] = {"last_out": 0, "rtt_ms": None, "samples": []}
+        lat = ip_latency[remote_ip]
+        if direction == "out":
+            lat["last_out"] = now_perf
+        elif direction == "in" and lat["last_out"] > 0:
+            rtt = (now_perf - lat["last_out"]) * 1000
+            if 0.5 < rtt < 3000:  # Sane range: 0.5ms - 3000ms
+                lat["samples"].append(rtt)
+                if len(lat["samples"]) > 10:
+                    lat["samples"] = lat["samples"][-10:]
+                # Median of last samples (more stable than average)
+                sorted_s = sorted(lat["samples"])
+                lat["rtt_ms"] = round(sorted_s[len(sorted_s) // 2], 1)
 
     try:
         print("[*] Scapy sniffer active - capturing all packets")
@@ -2637,6 +2638,8 @@ def api_connections():
         for ip, info in session_ips.items():
             geo = ip_geo_cache.get(ip, {})
             ping_info = ip_ping_cache.get(ip, {})
+            # Prefer real-time packet latency over ICMP ping
+            live_lat = ip_latency.get(ip, {}).get("rtt_ms")
             ports = sorted(info.get("ports", set()))
             protos = info.get("protos", set())
             proto_tag = ""
@@ -2669,7 +2672,7 @@ def api_connections():
                     bw_in = pb.get("rate_read", 0) * weight
                     bw_out = pb.get("rate_write", 0) * weight
 
-            ping_ms = ping_info.get("latency_ms")
+            ping_ms = live_lat if live_lat else ping_info.get("latency_ms")
             is_datacenter = geo.get("hosting", False)
             tz = geo.get("timezone", "")
 
