@@ -782,37 +782,38 @@ def refresh_fw_cache():
     new_set = set(blocked_ips)  # Start with NetGuard's own list
     new_nets = []               # CIDR networks
     try:
-        # PowerShell gives us clean output — works on any Windows language
+        # PowerShell batch query — fast (doesn't loop per rule)
         ps_cmd = (
             'powershell -NoProfile -Command "'
-            'Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue | '
-            'ForEach-Object { '
-            '  $addr = ($_ | Get-NetFirewallAddressFilter).RemoteAddress; '
-            '  foreach($a in $addr) { $a } '
-            '} | Where-Object { $_ -ne \'Any\' -and $_ -ne \'LocalSubnet\' }'
+            '$rules = Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue; '
+            'if ($rules) { '
+            '  $filters = $rules | Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue; '
+            '  $filters.RemoteAddress | Where-Object { $_ -ne \'Any\' -and $_ -ne \'LocalSubnet\' -and $_ -ne \'*\' } | Sort-Object -Unique '
+            '}'
             '"'
         )
         result = subprocess.run(
-            ps_cmd, shell=True, capture_output=True, text=True, timeout=20
+            ps_cmd, shell=True, capture_output=True, text=True, timeout=30
         )
-        if result.returncode == 0:
-            for line in result.stdout.strip().split('\n'):
-                ip_part = line.strip()
-                if not ip_part:
-                    continue
+        if result.returncode == 0 and result.stdout.strip():
+            lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
+            print(f"[FW] Found {len(lines)} blocked addresses from firewall")
+            for ip_part in lines:
                 if '/32' in ip_part:
-                    # Single IP with /32 suffix — treat as plain IP
                     new_set.add(ip_part.split('/')[0])
                 elif '/' in ip_part:
-                    # CIDR range (e.g. 34.0.64.0/19) — store as network
-                    new_set.add(ip_part)  # Keep string for display
+                    new_set.add(ip_part)
                     try:
                         new_nets.append(ipaddress.ip_network(ip_part, strict=False))
                     except:
                         pass
                 else:
                     new_set.add(ip_part)
-    except:
+        else:
+            stderr = (result.stderr or '').strip()[:200]
+            print(f"[FW] PowerShell returned code {result.returncode}, stderr: {stderr}")
+    except Exception as e:
+        print(f"[FW] PowerShell exception: {e}")
         # Fallback: try netsh with flexible parsing
         try:
             import re
@@ -1194,7 +1195,8 @@ HTML = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🛡️ NetGuard v5.1</title>
+<title>NetGuard v5.1</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,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">
 <style>
 /* ─── Local Fonts (zero external connections) ─── */
 @font-face { font-family: 'Inter'; font-weight: 300; font-style: normal; font-display: swap; src: url('/fonts/inter-300.ttf') format('truetype'); }
@@ -2693,19 +2695,21 @@ def api_blocks():
     try:
         ps_cmd = (
             'powershell -NoProfile -Command "'
-            'Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue | '
-            'ForEach-Object { '
-            '  $name = $_.DisplayName; '
-            '  $addrs = ($_ | Get-NetFirewallAddressFilter).RemoteAddress; '
-            '  foreach($a in $addrs) { '
-            '    if ($a -ne \'Any\' -and $a -ne \'LocalSubnet\') { '
-            '      Write-Output \\"$name|||$a\\" '
+            '$rules = Get-NetFirewallRule -Action Block -Enabled True -ErrorAction SilentlyContinue; '
+            'if ($rules) { '
+            '  foreach($r in $rules) { '
+            '    $name = $r.DisplayName; '
+            '    $addrs = ($r | Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue).RemoteAddress; '
+            '    foreach($a in $addrs) { '
+            '      if ($a -ne \'Any\' -and $a -ne \'LocalSubnet\' -and $a -ne \'*\') { '
+            '        Write-Output \\"$name|||$a\\" '
+            '      } '
             '    } '
             '  } '
             '}'
             '"'
         )
-        result = subprocess.run(ps_cmd, shell=True, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(ps_cmd, shell=True, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
             for line in result.stdout.strip().split('\n'):
                 line = line.strip()
